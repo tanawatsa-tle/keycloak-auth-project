@@ -155,9 +155,7 @@ app.get("/auth/callback", async (req, res, next) => {
     const { codeVerifier, state, nonce } = req.session;
 
     if (!codeVerifier || !state || !nonce) {
-      return res.status(400).send(
-        "Login session expired. Please try again."
-      );
+      return res.redirect(`${FRONTEND_URL}/home`);
     }
 
     // Get callback URL
