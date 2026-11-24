@@ -76,6 +76,18 @@ function saveSession(req) {
   });
 }
 
+// Read optional display claims from the access token returned by Keycloak.
+function readAccessTokenClaims(accessToken) {
+  const parts = accessToken?.split(".");
+  if (parts?.length !== 3) return {};
+
+  try {
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) ?? {};
+  } catch {
+    return {};
+  }
+}
+
 // Helper: Require authentication
 function requireAuth(req, res, next) {
   if (!req.session.user) {
@@ -178,12 +190,24 @@ app.get("/auth/callback", async (req, res, next) => {
       });
     });
 
+    // Keycloak includes realm and client roles in the access token by default.
+    const accessClaims = readAccessTokenClaims(tokens.access_token);
+    const roles = [claims, accessClaims].flatMap((tokenClaims) => [
+      ...(tokenClaims.realm_access?.roles ?? []),
+      ...Object.values(tokenClaims.resource_access ?? {}).flatMap(
+        (client) => client.roles ?? []
+      ),
+    ]);
+
     // Save logged-in user
     req.session.user = {
       id: claims.sub,
-      username: claims.preferred_username,
-      name: claims.name,
-      email: claims.email,
+      username: claims.preferred_username ?? accessClaims.preferred_username,
+      name: claims.name ?? accessClaims.name,
+      firstName: claims.given_name ?? accessClaims.given_name,
+      lastName: claims.family_name ?? accessClaims.family_name,
+      email: claims.email ?? accessClaims.email,
+      roles: [...new Set(roles)],
     };
 
     // Keep ID token for Keycloak logout
