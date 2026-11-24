@@ -88,6 +88,13 @@ function readAccessTokenClaims(accessToken) {
   }
 }
 
+function keycloakLogoutUrl(idToken) {
+  return oidc.buildEndSessionUrl(oidcConfig, {
+    id_token_hint: idToken,
+    post_logout_redirect_uri: `${BACKEND_URL}/auth/logout/callback`,
+  }).href;
+}
+
 // Helper: Require authentication
 function requireAuth(req, res, next) {
   if (!req.session.user) {
@@ -112,8 +119,9 @@ app.get("/health", (req, res) => {
 // 1. LOGIN
 // ==========================================
 
-app.get("/auth/login", async (req, res, next) => {
+app.get(["/auth/login", "/auth/register"], async (req, res, next) => {
   try {
+    const registering = req.path === "/auth/register";
     const codeVerifier = oidc.randomPKCECodeVerifier();
     const codeChallenge =
       await oidc.calculatePKCECodeChallenge(codeVerifier);
@@ -125,6 +133,7 @@ app.get("/auth/login", async (req, res, next) => {
     req.session.codeVerifier = codeVerifier;
     req.session.state = state;
     req.session.nonce = nonce;
+    req.session.registering = registering;
 
     await saveSession(req);
 
@@ -137,6 +146,7 @@ app.get("/auth/login", async (req, res, next) => {
       code_challenge_method: "S256",
       state,
       nonce,
+      ...(registering && { prompt: "create" }),
     });
 
     // Redirect browser to Keycloak
@@ -152,7 +162,7 @@ app.get("/auth/login", async (req, res, next) => {
 
 app.get("/auth/callback", async (req, res, next) => {
   try {
-    const { codeVerifier, state, nonce } = req.session;
+    const { codeVerifier, state, nonce, registering } = req.session;
 
     if (!codeVerifier || !state || !nonce) {
       return res.redirect(`${FRONTEND_URL}/home`);
@@ -187,6 +197,10 @@ app.get("/auth/callback", async (req, res, next) => {
         else resolve();
       });
     });
+
+    if (registering) {
+      return res.redirect(keycloakLogoutUrl(tokens.id_token));
+    }
 
     // Keycloak includes realm and client roles in the access token by default.
     const accessClaims = readAccessTokenClaims(tokens.access_token);
@@ -273,21 +287,10 @@ app.get("/auth/logout", async (req, res, next) => {
 
       // If no ID token exists, return to login
       if (!idToken) {
-        return res.redirect(`${FRONTEND_URL}/login`);
+        return res.redirect(`${BACKEND_URL}/auth/login`);
       }
 
-      // Build Keycloak logout URL
-      const logoutUrl = oidc.buildEndSessionUrl(
-        oidcConfig,
-        {
-          id_token_hint: idToken,
-          post_logout_redirect_uri:
-            `${BACKEND_URL}/auth/logout/callback`,
-        }
-      );
-
-      // Redirect to Keycloak logout
-      res.redirect(logoutUrl.href);
+      res.redirect(keycloakLogoutUrl(idToken));
     });
   } catch (error) {
     next(error);
@@ -302,7 +305,6 @@ app.get("/auth/logout/callback", (req, res) => {
   req.session.destroy(() => {
     res.clearCookie("keycloak.sid");
 
-    // เริ่มกระบวนการ Login ใหม่
     res.redirect(`${BACKEND_URL}/auth/login`);
   });
 });

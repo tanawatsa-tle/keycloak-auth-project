@@ -16,7 +16,6 @@ function Home() {
           keycloak.login();
           return;
         }
-
         setUser(currentUser);
       } catch (err) {
         setError(err.message);
@@ -30,7 +29,7 @@ function Home() {
 
   if (loading) return <h2>Loading...</h2>;
   if (error) return <h2>{error}</h2>;
-  if (!user) return <h2>User not found</h2>;
+  if (!user) return null;
 
   const roles = user.roles ?? [];
 

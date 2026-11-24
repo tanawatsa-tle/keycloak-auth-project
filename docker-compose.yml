@@ -10,12 +10,14 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin123
+      APP_REGISTRATION_URL: ${APP_REGISTRATION_URL:-http://localhost:3001/auth/register}
 
     ports:
       - "8080:8080"
 
     volumes:
       - keycloak_data:/opt/keycloak/data
+      - ./keycloak/themes/app-registration:/opt/keycloak/themes/app-registration:ro
 
 volumes:
   keycloak_data:
