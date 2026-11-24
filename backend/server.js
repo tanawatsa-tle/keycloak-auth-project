@@ -119,9 +119,10 @@ app.get("/health", (req, res) => {
 // 1. LOGIN
 // ==========================================
 
-app.get(["/auth/login", "/auth/register"], async (req, res, next) => {
+app.get(["/auth/login", "/auth/register", "/auth/register/google"], async (req, res, next) => {
   try {
-    const registering = req.path === "/auth/register";
+    const googleSignup = req.path === "/auth/register/google";
+    const registering = req.path === "/auth/register" || googleSignup;
     const codeVerifier = oidc.randomPKCECodeVerifier();
     const codeChallenge =
       await oidc.calculatePKCECodeChallenge(codeVerifier);
@@ -138,6 +139,9 @@ app.get(["/auth/login", "/auth/register"], async (req, res, next) => {
     await saveSession(req);
 
     // Create Keycloak login URL
+    const signupParams = googleSignup
+      ? { kc_idp_hint: "google", prompt: "login" }
+      : registering ? { prompt: "create" } : {};
     const loginUrl = oidc.buildAuthorizationUrl(oidcConfig, {
       redirect_uri: `${BACKEND_URL}/auth/callback`,
       response_type: "code",
@@ -146,7 +150,7 @@ app.get(["/auth/login", "/auth/register"], async (req, res, next) => {
       code_challenge_method: "S256",
       state,
       nonce,
-      ...(registering && { prompt: "create" }),
+      ...signupParams,
     });
 
     // Redirect browser to Keycloak
