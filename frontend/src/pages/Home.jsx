@@ -37,9 +37,7 @@ function Home() {
     <div className="home-container">
       <div className="profile-card">
         <div className="profile-header">
-          <div className="avatar">
-            {(user.firstName?.[0] ?? user.username?.[0] ?? "U").toUpperCase()}
-          </div>
+          
 
           <h1>Welcome Home!</h1>
           <p>You have successfully logged in.</p>
