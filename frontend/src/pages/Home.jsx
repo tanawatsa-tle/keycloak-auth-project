@@ -7,6 +7,9 @@ function Home() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
 
   useEffect(() => {
     async function fetchUser() {
@@ -32,6 +35,29 @@ function Home() {
   if (!user) return null;
 
   const roles = user.roles ?? [];
+
+  async function saveProfile(nextProfile) {
+    setSaving(true);
+    setProfileError("");
+    try {
+      setUser(await keycloak.saveProfile(nextProfile));
+      setEditing(false);
+    } catch (err) {
+      setProfileError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    saveProfile({
+      username: values.get("username"),
+      firstName: values.get("firstName"),
+      lastName: values.get("lastName"),
+    });
+  }
 
   return (
     <div className="home-container">
@@ -78,6 +104,34 @@ function Home() {
             </div>
           </div>
         </div>
+
+        {profileError && <p role="alert">{profileError}</p>}
+        {editing ? (
+          <form className="profile-form" onSubmit={handleSubmit}>
+            <label>
+              Username
+              <input name="username" autoComplete="username" required maxLength={255} defaultValue={user.username} />
+            </label>
+            <label>
+              First name
+              <input name="firstName" autoComplete="given-name" maxLength={100} defaultValue={user.firstName} />
+            </label>
+            <label>
+              Last name
+              <input name="lastName" autoComplete="family-name" maxLength={100} defaultValue={user.lastName} />
+            </label>
+            <div className="profile-actions">
+              <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button>
+              <button type="button" disabled={saving} onClick={() => setEditing(false)}>Cancel</button>
+            </div>
+          </form>
+        ) : (
+          <div className="profile-actions">
+            <button type="button" disabled={saving} onClick={() => setEditing(true)}>
+              Edit profile
+            </button>
+          </div>
+        )}
 
         <button className="logout-button" onClick={keycloak.logout}>
           Logout

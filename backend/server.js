@@ -15,6 +15,8 @@ const PORT = process.env.PORT || 3001;
 const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER;
 const CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID;
 const CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET;
+const PROFILE_CLIENT_ID = process.env.KEYCLOAK_PROFILE_CLIENT_ID;
+const PROFILE_CLIENT_SECRET = process.env.KEYCLOAK_PROFILE_CLIENT_SECRET;
 
 const BACKEND_URL =
   process.env.BACKEND_URL || `http://localhost:${PORT}`;
@@ -24,6 +26,7 @@ const FRONTEND_URL =
 
 // OpenID Connect configuration
 let oidcConfig;
+let profileOidcConfig;
 
 // Check required environment variables
 const requiredEnv = [
@@ -258,6 +261,61 @@ app.get("/api/me", (req, res) => {
   });
 });
 
+app.put("/api/me/profile", requireAuth, async (req, res) => {
+  const { username, firstName, lastName } = req.body ?? {};
+  if (
+    typeof username !== "string" || !username.trim() || username.trim().length > 255 ||
+    typeof firstName !== "string" || firstName.trim().length > 100 ||
+    typeof lastName !== "string" || lastName.trim().length > 100
+  ) {
+    return res.status(400).json({ message: "Enter a username and names of up to 100 characters." });
+  }
+
+  if (!profileOidcConfig) {
+    return res.status(503).json({ message: "Keycloak profile editing has not been configured." });
+  }
+
+  const profile = {
+    username: username.trim(),
+    firstName: firstName.trim(),
+    lastName: lastName.trim(),
+  };
+
+  const userUrl = new URL(KEYCLOAK_ISSUER);
+  userUrl.pathname = userUrl.pathname.replace(/\/realms\/([^/]+)\/?$/, "/admin/realms/$1") +
+    `/users/${encodeURIComponent(req.session.user.id)}`;
+  const { access_token: accessToken } = await oidc.clientCredentialsGrant(profileOidcConfig);
+  const response = await fetch(userUrl, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(profile),
+    redirect: "error",
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (response.status === 409) {
+    return res.status(409).json({ message: "This username is already in use." });
+  }
+  if (response.status === 400) {
+    return res.status(400).json({ message: "Keycloak rejected the profile. Check the username and realm profile rules." });
+  }
+  if (!response.ok) {
+    return res.status(502).json({ message: "Keycloak could not update your profile." });
+  }
+
+  req.session.user = {
+    ...req.session.user,
+    ...profile,
+    name: [profile.firstName, profile.lastName].filter(Boolean).join(" "),
+  };
+  delete req.session.profile;
+  await saveSession(req);
+  res.json({ user: req.session.user });
+});
+
 // ==========================================
 // 4. PROTECTED HOME API
 // ==========================================
@@ -348,6 +406,17 @@ async function startServer() {
     );
 
     console.log("Successfully connected to Keycloak!");
+
+    if (PROFILE_CLIENT_ID && PROFILE_CLIENT_SECRET) {
+      profileOidcConfig = new oidc.Configuration(
+        oidcConfig.serverMetadata(),
+        PROFILE_CLIENT_ID,
+        PROFILE_CLIENT_SECRET
+      );
+      if (new URL(KEYCLOAK_ISSUER).protocol === "http:") {
+        oidc.allowInsecureRequests(profileOidcConfig);
+      }
+    }
 
     app.listen(PORT, () => {
       console.log("--------------------------------");

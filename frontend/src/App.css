@@ -1,0 +1,19 @@
+.profile-form,
+.profile-form label {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.profile-form input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.6rem;
+  font: inherit;
+}
+
+.profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
