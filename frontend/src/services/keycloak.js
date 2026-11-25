@@ -1,6 +1,16 @@
 
 const BACKEND_URL = "http://localhost:3001";
 
+async function request(path, options) {
+  const response = await fetch(`${BACKEND_URL}${path}`, {
+    ...options,
+    credentials: "include",
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message || "The request failed.");
+  return data;
+}
+
 const keycloak = {
   // Redirect user to Keycloak login through backend
   login() {
@@ -50,6 +60,26 @@ const keycloak = {
       throw new Error(data.message || "Could not save your profile.");
     }
     return data.user;
+  },
+
+  getAccessToken() {
+    return request("/api/me/access-token", { cache: "no-store" });
+  },
+
+  listUsers(first) {
+    return request(`/api/admin/users?first=${first}`);
+  },
+
+  createUser(user) {
+    return request("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(user),
+    });
+  },
+
+  deleteUser(id) {
+    return request(`/api/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   // Check whether user is logged in

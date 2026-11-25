@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from "react";
 import keycloak from "../services/keycloak";
+import AdminUsers from "./AdminUsers";
 import "../App.css";
 
 function Home() {
@@ -10,6 +11,8 @@ function Home() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [tokenStatus, setTokenStatus] = useState("");
+  const [loadingToken, setLoadingToken] = useState(false);
 
   useEffect(() => {
     async function fetchUser() {
@@ -58,51 +61,63 @@ function Home() {
       lastName: values.get("lastName"),
     });
   }
+  async function showToken() {
+    setLoadingToken(true);
+    setTokenStatus("");
+    try {
+      const { accessToken, claims } = await keycloak.getAccessToken();
+      console.log("Access token:", accessToken);
+      console.log("Decoded JWT payload:", claims);
+      setTokenStatus("Access token and decoded JWT logged to the browser console.");
+    } catch (err) {
+      setTokenStatus(err.message);
+    } finally {
+      setLoadingToken(false);
+    }
+  }
 
   return (
-    <div className="home-container">
-      <div className="profile-card">
-        <div className="profile-header">
-          
-
-          <h1>Welcome Home!</h1>
-          <p>You have successfully logged in.</p>
+    <main className="dashboard">
+      <header className="dashboard-header">
+        <h1>My Application</h1>
+        <span className="status-badge">Authenticated</span>
+      </header>
+      <section className="dashboard-section profile-summary" aria-label="Signed-in user">
+        <span className="profile-avatar" aria-hidden="true">{(user.username?.[0] ?? "U").toUpperCase()}</span>
+        <div>   
+          <h2>Welcome, {user.username || "user"}</h2>
+          <p>{user.email || "No email on file"}</p>
         </div>
+        {user.isAdmin && <span className="status-badge">ADMIN</span>}
+      </section>
 
-        <div className="profile-details">
-          <div className="detail">
-            <span>Username :</span>
-            <strong>{user.username || "N/A"}</strong>
+      <section className="dashboard-section" aria-labelledby="authentication-heading">
+        <h2 id="authentication-heading">Authentication Information</h2>
+        <dl className="info-list">
+          <div><dt>Login status</dt><dd>Authenticated</dd></div>
+          <div><dt>Identity provider</dt><dd>Keycloak</dd></div>
+          <div><dt>Token type</dt><dd>Bearer</dd></div>
+          <div>
+            <dt>User role</dt>
+            <dd className="role-list">
+              {roles.length ? roles.map((role) => <span className="role-badge" key={role}>{role}</span>) : "No roles assigned"}
+            </dd>
           </div>
+        </dl>
+        <div className="profile-actions">
+          <button type="button" disabled={loadingToken} onClick={showToken}>Log Access Token &amp; JWT</button>
+          <button type="button" onClick={keycloak.logout}>Logout</button>
+        </div>
+        {tokenStatus && <p role="status">{tokenStatus}</p>}
+      </section>
 
-          <div className="detail">
-            <span>First Name : </span>
-            <strong>{user.firstName || "N/A"}</strong>
-          </div>
-
-          <div className="detail">
-            <span>Last Name : </span>
-            <strong>{user.lastName || "N/A"}</strong>
-          </div>
-
-          <div className="detail">
-            <span>Email : </span>
-            <strong>{user.email || "N/A"}</strong>
-          </div>
-
-          <div className="detail roles-detail">
-            
-            <div className="roles">
-            <span>Role : </span>
-              {roles.length > 0
-                ? roles.map((role) => (
-                    <span className="role-badge" key={role}>
-                      {role}
-                    </span>
-                  ))
-                : "No roles assigned"}
-            </div>
-          </div>
+      <section className="dashboard-section" aria-labelledby="profile-heading">
+        <div className="section-heading">
+          <h2 id="profile-heading">Profile</h2>
+          {!editing && <button className="primary-button" type="button" onClick={() => {
+            setProfileError("");
+            setEditing(true);
+          }}>Edit profile</button>}
         </div>
 
         {profileError && <p role="alert">{profileError}</p>}
@@ -121,23 +136,22 @@ function Home() {
               <input name="lastName" autoComplete="family-name" maxLength={100} defaultValue={user.lastName} />
             </label>
             <div className="profile-actions">
-              <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button>
+              <button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button>
               <button type="button" disabled={saving} onClick={() => setEditing(false)}>Cancel</button>
             </div>
           </form>
         ) : (
-          <div className="profile-actions">
-            <button type="button" disabled={saving} onClick={() => setEditing(true)}>
-              Edit profile
-            </button>
-          </div>
+          <dl className="info-list">
+            <div><dt>Username</dt><dd>{user.username || "—"}</dd></div>
+            <div><dt>First name</dt><dd>{user.firstName || "—"}</dd></div>
+            <div><dt>Last name</dt><dd>{user.lastName || "—"}</dd></div>
+            <div><dt>Email</dt><dd>{user.email || "—"}</dd></div>
+          </dl>
         )}
+      </section>
 
-        <button className="logout-button" onClick={keycloak.logout}>
-          Logout
-        </button>
-      </div>
-    </div>
+      {user.isAdmin && <AdminUsers currentUserId={user.id} />}
+    </main>
   );
 }
 

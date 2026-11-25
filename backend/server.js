@@ -110,6 +110,49 @@ function requireAuth(req, res, next) {
   next();
 }
 
+const hiddenRoles = new Set([
+  "default-roles-my-company",
+  "offline_access",
+  "uma_authorization",
+  "manage-account",
+  "manage-account-links",
+  "view-profile",
+]);
+
+function userForResponse(user) {
+  return {
+    ...user,
+    roles: (user.roles ?? []).filter((role) => !hiddenRoles.has(role)),
+  };
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.session.user.isAdmin) {
+    return res.status(403).json({ message: "The admin realm role is required." });
+  }
+  next();
+}
+
+async function keycloakUsers(path = "", options = {}) {
+  if (!profileOidcConfig) {
+    throw Object.assign(new Error("Keycloak service account is not configured."), { status: 503 });
+  }
+  const url = new URL(KEYCLOAK_ISSUER);
+  url.pathname = url.pathname.replace(/\/realms\/([^/]+)\/?$/, "/admin/realms/$1") + "/users" + path;
+  url.search = new URLSearchParams(options.query ?? {}).toString();
+  const { access_token: accessToken } = await oidc.clientCredentialsGrant(profileOidcConfig);
+  return fetch(url, {
+    method: options.method ?? "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(options.body && { "Content-Type": "application/json" }),
+    },
+    body: options.body && JSON.stringify(options.body),
+    redirect: "error",
+    signal: AbortSignal.timeout(10000),
+  });
+}
+
 // Health check
 app.get("/health", (req, res) => {
   res.json({
@@ -227,10 +270,12 @@ app.get("/auth/callback", async (req, res, next) => {
       lastName: claims.family_name ?? accessClaims.family_name,
       email: claims.email ?? accessClaims.email,
       roles: [...new Set(roles)],
+      isAdmin: [claims, accessClaims].some((token) => token.realm_access?.roles?.includes("admin")),
     };
 
     // Keep ID token for Keycloak logout
     req.session.idToken = tokens.id_token;
+    req.session.accessToken = tokens.access_token;
 
     await saveSession(req);
 
@@ -257,8 +302,21 @@ app.get("/api/me", (req, res) => {
 
   res.json({
     authenticated: true,
-    user: req.session.user,
+    user: userForResponse(req.session.user),
   });
+});
+
+app.get("/api/me/access-token", requireAuth, (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const accessToken = req.session.accessToken;
+  if (!accessToken) {
+    return res.status(409).json({ message: "Sign out and sign in again to view your access token." });
+  }
+  const claims = readAccessTokenClaims(accessToken);
+  if (claims.exp && claims.exp * 1000 <= Date.now()) {
+    return res.status(409).json({ message: "Your access token expired. Sign in again for a fresh token." });
+  }
+  res.json({ accessToken, claims: Object.keys(claims).length ? claims : null });
 });
 
 app.put("/api/me/profile", requireAuth, async (req, res) => {
@@ -281,19 +339,9 @@ app.put("/api/me/profile", requireAuth, async (req, res) => {
     lastName: lastName.trim(),
   };
 
-  const userUrl = new URL(KEYCLOAK_ISSUER);
-  userUrl.pathname = userUrl.pathname.replace(/\/realms\/([^/]+)\/?$/, "/admin/realms/$1") +
-    `/users/${encodeURIComponent(req.session.user.id)}`;
-  const { access_token: accessToken } = await oidc.clientCredentialsGrant(profileOidcConfig);
-  const response = await fetch(userUrl, {
+  const response = await keycloakUsers(`/${encodeURIComponent(req.session.user.id)}`, {
     method: "PUT",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(profile),
-    redirect: "error",
-    signal: AbortSignal.timeout(10000),
+    body: profile,
   });
 
   if (response.status === 409) {
@@ -313,7 +361,70 @@ app.put("/api/me/profile", requireAuth, async (req, res) => {
   };
   delete req.session.profile;
   await saveSession(req);
-  res.json({ user: req.session.user });
+  res.json({ user: userForResponse(req.session.user) });
+});
+
+app.get("/api/admin/users", requireAuth, requireAdmin, async (req, res) => {
+  const first = Number(req.query.first ?? 0);
+  if (!Number.isSafeInteger(first) || first < 0) {
+    return res.status(400).json({ message: "Invalid page offset." });
+  }
+  const response = await keycloakUsers("", { query: { first, max: 21 } });
+  if (!response.ok) {
+    return res.status(502).json({ message: "Keycloak could not list users." });
+  }
+  const users = await response.json();
+  res.json({
+    users: users.slice(0, 20).map(({ id, username, firstName, lastName, email }) => ({
+      id, username, firstName, lastName, email,
+    })),
+    hasNext: users.length > 20,
+  });
+});
+
+app.post("/api/admin/users", requireAuth, requireAdmin, async (req, res) => {
+  const { username, firstName, lastName, email, password } = req.body ?? {};
+  const fields = [[username, 255], [firstName, 100], [lastName, 100], [email, 254]];
+  if (
+    fields.some(([value, max]) => typeof value !== "string" || !value.trim() || value.trim().length > max) ||
+    !/^[^\s@]+@[^\s@]+$/.test(email.trim()) ||
+    typeof password !== "string" || !password.trim() || password.length > 256
+  ) {
+    return res.status(400).json({ message: "Enter a username, first and last name, valid email, and temporary password." });
+  }
+  const response = await keycloakUsers("", {
+    method: "POST",
+    body: {
+      username: username.trim(),
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.trim(),
+      enabled: true,
+      credentials: [{ type: "password", value: password, temporary: true }],
+    },
+  });
+  if (response.status === 409) {
+    return res.status(409).json({ message: "That username or email already exists." });
+  }
+  if (response.status === 400) {
+    return res.status(400).json({ message: "Keycloak rejected the account. Check the profile and password rules." });
+  }
+  if (!response.ok) {
+    return res.status(502).json({ message: "Keycloak could not create the user." });
+  }
+  res.status(201).json({ created: true });
+});
+
+app.delete("/api/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  if (id === req.session.user.id || id === "." || id === ".." || /[\/\\]/.test(id)) {
+    return res.status(400).json({ message: "Select another user to delete." });
+  }
+  const response = await keycloakUsers(`/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!response.ok && response.status !== 404) {
+    return res.status(502).json({ message: "Keycloak could not delete the user." });
+  }
+  res.json({ deleted: true });
 });
 
 // ==========================================
@@ -323,7 +434,7 @@ app.put("/api/me/profile", requireAuth, async (req, res) => {
 app.get("/api/home", requireAuth, (req, res) => {
   res.json({
     message: "Welcome to Home!",
-    user: req.session.user,
+    user: userForResponse(req.session.user),
   });
 });
 
@@ -380,6 +491,10 @@ app.use((error, req, res, next) => {
 
   if (res.headersSent) {
     return next(error);
+  }
+
+  if (error.status === 503) {
+    return res.status(503).json({ message: "Keycloak service account is unavailable." });
   }
 
   res.status(500).json({
