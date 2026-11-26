@@ -165,10 +165,19 @@ app.get("/health", (req, res) => {
 // 1. LOGIN
 // ==========================================
 
-app.get(["/auth/login", "/auth/register", "/auth/register/google"], async (req, res, next) => {
+app.get([
+  "/auth/login",
+  "/auth/login/microsoft",
+  "/auth/register",
+  "/auth/register/google",
+  "/auth/register/microsoft",
+], async (req, res, next) => {
   try {
+    const microsoftSignup = req.path === "/auth/register/microsoft";
+    const microsoftAuth = req.path === "/auth/login/microsoft" || microsoftSignup;
     const googleSignup = req.path === "/auth/register/google";
-    const registering = req.path === "/auth/register" || googleSignup;
+    const formSignup = req.path === "/auth/register";
+    const registering = formSignup || googleSignup || microsoftSignup;
     const codeVerifier = oidc.randomPKCECodeVerifier();
     const codeChallenge =
       await oidc.calculatePKCECodeChallenge(codeVerifier);
@@ -187,7 +196,7 @@ app.get(["/auth/login", "/auth/register", "/auth/register/google"], async (req, 
     // Create Keycloak login URL
     const signupParams = googleSignup
       ? { kc_idp_hint: "google", prompt: "login" }
-      : registering ? { prompt: "create" } : {};
+      : formSignup ? { prompt: "create" } : {};
     const loginUrl = oidc.buildAuthorizationUrl(oidcConfig, {
       redirect_uri: `${BACKEND_URL}/auth/callback`,
       response_type: "code",
@@ -197,6 +206,11 @@ app.get(["/auth/login", "/auth/register", "/auth/register/google"], async (req, 
       state,
       nonce,
       ...signupParams,
+      ...(microsoftAuth && {
+        kc_idp_hint: "microsoft",
+        prompt: "select_account",
+        max_age: "0",
+      }),
     });
 
     // Redirect browser to Keycloak
