@@ -5,7 +5,7 @@ services:
     container_name: auth-keycloak
     restart: unless-stopped
 
-    command: start-dev
+    command: start-dev --features=identity-brokering-api:v2
 
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
