@@ -11,6 +11,7 @@ flowchart LR
     Store["Express session<br/>MemoryStore"]
     KC["Keycloak<br/>localhost:8080"]
     Google["Google Identity Provider"]
+    Microsoft["Microsoft Entra ID"]
     Data["Keycloak Docker volume"]
 
     Web -->|"JSON API + session cookie"| API
@@ -19,17 +20,18 @@ flowchart LR
     API -->|"Service account token and Admin REST API"| KC
     Web -.->|"Browser redirects for login, registration and logout"| KC
     KC <-->|"Google OAuth"| Google
+    KC <-->|"Microsoft OAuth"| Microsoft
     KC -->|"Persist realm and user data"| Data
 ```
 
 | ส่วน                                                                               | หน้าที่                                                                              |
 | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| [backend/server.js](../backend/server.js)                                          | ตั้งค่า OIDC, ตรวจ callback, เก็บเซสชัน, ส่งข้อมูลผู้ใช้ และเรียก Keycloak Admin API |
-| [Home.jsx](../frontend/src/pages/Home.jsx)                                         | แสดงโปรไฟล์และ Role, เปิดฟอร์มแก้โปรไฟล์ และเรียกดู Access Token ตามที่ผู้ใช้กด      |
-| [AdminUsers.jsx](../frontend/src/pages/AdminUsers.jsx)                             | แสดงรายการผู้ใช้แบบแบ่งหน้าและฟอร์มเพิ่มหรือลบบัญชีสำหรับแอดมิน                      |
-| [keycloak.js](../frontend/src/services/keycloak.js)                                | เริ่ม Login และ Logout ผ่าน backend และส่ง session cookie ไปกับ API requests         |
-| [ธีม app-registration](../keycloak/themes/app-registration/login/theme.properties) | สืบทอด UI ของ `keycloak.v2` และปรับลิงก์ Register กับปุ่มสมัครด้วย Google            |
-| [docker-compose.yml](../docker-compose.yml)                                        | รัน Keycloak, mount ธีม และเก็บข้อมูล Keycloak ใน named volume                       |
+| [backend/server.js](backend/server.js) | ตั้งค่า OIDC, ตรวจ callback, เก็บเซสชัน, ส่งข้อมูลผู้ใช้ และเรียก Keycloak Admin API |
+| [Home.jsx](frontend/src/pages/Home.jsx) | แสดงโปรไฟล์และ Role, เปิดฟอร์มแก้โปรไฟล์ และเรียกดู Access Token ตามที่ผู้ใช้กด |
+| [AdminUsers.jsx](frontend/src/pages/AdminUsers.jsx) | แสดงรายการผู้ใช้แบบแบ่งหน้าและฟอร์มเพิ่มหรือลบบัญชีสำหรับแอดมิน |
+| [keycloak.js](frontend/src/services/keycloak.js) | เริ่ม Login และ Logout ผ่าน backend และส่ง session cookie ไปกับ API requests |
+| [ธีม app-registration](keycloak/themes/app-registration/login/theme.properties) | สืบทอด UI ของ `keycloak.v2` พร้อมลิงก์ Register และปุ่มสมัครด้วย Google หรือ Microsoft |
+| [docker-compose.yml](docker-compose.yml) | รัน Keycloak, mount ธีม และเก็บข้อมูล Keycloak ใน named volume |
 
 เบราว์เซอร์ใช้คุกกี้ `keycloak.sid` แบบ HttpOnly เพื่ออ้างถึงเซสชันใน backend เซสชันเก็บข้อมูลผู้ใช้, ID token สำหรับ Logout และ Access token สำหรับปุ่ม Debug แอปใช้ MemoryStore ตามค่าเริ่มต้นของ `express-session` การรีสตาร์ต backend จึงล้างเซสชันของแอป ส่วนข้อมูลบัญชีที่บันทึกใน Keycloak อยู่ใน Docker volume
 
@@ -41,10 +43,14 @@ flowchart TD
     Home -->|"200"| Profile["แสดงโปรไฟล์และ Role"]
     Home -->|"401"| Login["/auth/login เปิดหน้า Login ของ Keycloak"]
     Login -->|"รหัสผ่านหรือ Sign in with Google"| Callback["/auth/callback"]
+    Login -->|"Sign in with Microsoft"| MicrosoftLogin["/auth/login/microsoft เปิดหน้าเลือกบัญชี"]
+    MicrosoftLogin --> Callback
     Login -->|"Register"| Register["/auth/register เปิดหน้า Register"]
     Register -->|"ส่งฟอร์มสมัคร"| Callback
     Register -->|"Sign up with Google"| Google["/auth/register/google เปิด Google"]
     Google --> Callback
+    Register -->|"Sign up with Microsoft"| MicrosoftRegister["/auth/register/microsoft เปิดหน้าเลือกบัญชี"]
+    MicrosoftRegister --> Callback
     Callback --> Verify["แลก authorization code และตรวจ state, nonce, PKCE"]
     Verify --> Intent{"registering เป็น true?"}
     Intent -->|"ใช่"| End["จบเซสชัน Keycloak ที่เกิดจากการสมัคร"]
@@ -108,7 +114,7 @@ npm ci
 npm run dev
 ```
 
-เปิด `http://localhost:5173` สำหรับหน้าแอป และใช้ `http://localhost:3001/health` ตรวจ backend ถ้าเปลี่ยน host หรือ port ให้ปรับค่าใน `.env` และ URL ฝั่ง frontend ใน [keycloak.js](../frontend/src/services/keycloak.js) ให้ตรงกัน ตั้ง `APP_REGISTRATION_URL` ให้ชี้ไปที่ `<BACKEND_URL>/auth/register` หากใช้ backend คนละ URL กับค่าเริ่มต้นของ Compose
+เปิด `http://localhost:5173` สำหรับหน้าแอป และใช้ `http://localhost:3001/health` ตรวจ backend ถ้าเปลี่ยน host หรือ port ให้ปรับค่าใน `.env` และ URL ฝั่ง frontend ใน [keycloak.js](frontend/src/services/keycloak.js) ให้ตรงกัน ตั้ง `APP_REGISTRATION_URL` ให้ชี้ไปที่ `<BACKEND_URL>/auth/register` หากใช้ backend คนละ URL กับค่าเริ่มต้นของ Compose
 
 ## เพิ่ม Client ใหม่ใน Keycloak
 
@@ -141,6 +147,19 @@ Backend อ่าน client สำหรับ Login ได้หนึ่งต
 
 [คู่มือ Google OAuth](https://developers.google.com/identity/protocols/oauth2/web-server#creatingcred) · [คู่มือ Google Identity Provider ของ Keycloak](https://www.keycloak.org/docs/latest/server_admin/#_google)
 
+### เปิด Microsoft Login และ Register
+
+1. ใน Keycloak ไปที่ **Identity providers → Add provider → Microsoft** และตั้ง alias เป็น `microsoft` คัดลอก **Redirect URI** ที่ Keycloak แสดง สำหรับ local โดยทั่วไปคือ `http://localhost:8080/realms/my-company/broker/microsoft/endpoint`
+2. ใน Microsoft Entra **App registrations** เพิ่ม URI นี้เป็น **Web redirect URI** และเปิดสิทธิ์ **Microsoft Graph → Delegated → User.Read** ใส่ Tenant ID ขององค์กร, Application (client) ID และ Client secret ใน Microsoft provider ของ Keycloak แล้วตั้ง **Default scopes** เป็น `User.Read` [คู่มือการลงทะเบียนแอป Microsoft Entra](https://learn.microsoft.com/entra/identity-platform/quickstart-register-app)
+3. ตรวจว่า login client ใช้ธีม `app-registration` และ Microsoft provider เปิดให้แสดงบนหน้า Login ปุ่ม Microsoft ใน Login และ Register ขอ `prompt=select_account` เพื่อเปิดหน้าเลือกบัญชี [Microsoft OAuth authorization code flow](https://learn.microsoft.com/entra/identity-platform/v2-oauth2-auth-code-flow)
+4. ถ้าต้องการข้ามหน้าทบทวนข้อมูลครั้งแรก ให้ทำสำเนา **First Broker Login** ใน **Authentication → Flows** ปิด **Review Profile** ใน flow ที่คัดลอก แล้วเลือก flow นั้นใน **First login flow override** ของ Microsoft provider คงขั้นตอนยืนยันการเชื่อมบัญชีเดิมไว้ หาก Entra ไม่มีชื่อหรือนามสกุล ให้ตรวจ Required field ใน **Realm settings → User profile** การเปลี่ยนเงื่อนไขช่องบังคับมีผลทั้ง realm [คู่มือ First Login Flow ของ Keycloak](https://www.keycloak.org/docs/26.8.2/server_admin/#_identity_broker_first_login)
+
+หน้า Home อ่านชื่อ นามสกุล และอีเมลจาก token ที่ Keycloak ออกให้แอป โดยใช้ ID token เป็นหลักและ Access token เป็นค่าสำรอง ถ้าไม่มีค่าในทั้งสอง token หน้า Home จะแสดง `—`
+
+**Department** มาจาก Microsoft Graph `/me?$select=department` ตอนเข้าสู่ระบบด้วย Microsoft ให้เปิด **Store token in session** ใน Microsoft provider และตั้ง **Allow retrieve external tokens** ให้ login client โดยอนุญาต alias `microsoft` เมื่อไม่มีค่า หรือ Graph ตอบผิดพลาด หน้า Home จะแสดง `-` และผู้ใช้ยังเข้าสู่ระบบได้ [Microsoft Graph Get user](https://learn.microsoft.com/graph/api/user-get)
+
+**สถานะการแมป `userType`** Compose เปิด Identity Brokering API V2 แล้ว ส่วนการอ่าน `userType` จาก Graph และ assign `entra-member` หรือ `entra-guest` ยังเป็นงานที่จะเพิ่มใน backend [คู่มือ Identity Brokering API V2](https://www.keycloak.org/docs/26.8.2/server_development/#_identity_broker_token_retrieval)
+
 ## Troubleshooting
 
 เริ่มจากดู **DevTools → Network** ว่า request ไหนล้มเหลวและตอบ status อะไร แล้วเทียบกับ log ของ backend และ Keycloak
@@ -161,6 +180,8 @@ curl -fsS http://localhost:8080/realms/my-company/.well-known/openid-configurati
 | สมัครเสร็จแล้วเข้า Home ทันที                                | ตรวจ **Login theme** ของ login client และเอาเมาส์ชี้ **Register** บนหน้า Keycloak ลิงก์ควรชี้ไป `/auth/register` ของ backend ถ้าธีมไม่ขึ้นในรายการให้รัน `docker compose up -d keycloak` แล้วรีเฟรช Admin Console |
 | Back to Login แล้วล็อกอินสำเร็จแต่กลับหน้า Login อีกครั้ง    | ลิงก์ Back to Login บนธีมยังใช้ปลายทางเดิมของ Keycloak หากกลับมาในรอบสมัครเดิม backend อาจยังอ่าน `registering=true` เปิดแอปใหม่เพื่อเริ่มรอบ `/auth/login` แล้วทดสอบซ้ำ                                          |
 | ปุ่ม Google ไม่ขึ้น หรือ Google ขึ้น `redirect_uri_mismatch` | ตรวจ alias `google`, สถานะ provider, ธีม `app-registration` และ Authorized redirect URI ใน Google ให้ตรงกับที่ Keycloak แสดง                                                                                      |
+| ปุ่ม Microsoft ไม่ขึ้นหรือไม่เปิดหน้าเลือกบัญชี | ตรวจ alias `microsoft`, สถานะ provider และธีม `app-registration` ลิงก์ควรผ่าน `/auth/login/microsoft` หรือ `/auth/register/microsoft` |
+| Microsoft ขอกรอกข้อมูลหรือรหัสผ่าน Keycloak ครั้งแรก | ตรวจ First Broker Login flow และช่องบังคับ ถ้าเป็นขั้นตอนเชื่อมบัญชีที่มีอีเมลหรือ Username ซ้ำ ให้ยืนยันบัญชีเดิมตาม flow |
 | แก้โปรไฟล์หรือโหลดรายการผู้ใช้แล้วได้ `503`                  | ตรวจ `KEYCLOAK_PROFILE_CLIENT_ID` และ `KEYCLOAK_PROFILE_CLIENT_SECRET` ว่าตั้งทั้งคู่ใน `backend/.env` และรีสตาร์ต backend หลังแก้                                                                                |
 | แก้โปรไฟล์หรือจัดการผู้ใช้แล้วได้ `502`                      | Backend ได้การปฏิเสธจาก Admin API ให้ตรวจ `kc-admin-api` เป็น Default scope ของ profile client หาก upstream ตอบ `401` และตรวจ `manage-users` ใน role ของ service account กับ scope mapping หาก upstream ตอบ `403` |
 | ผู้ใช้มองไม่เห็นส่วน Users หรือ API ตอบ `403`                | ตรวจว่า account ของคนที่ล็อกอินได้ **Realm Role `admin`** จาก realm ของแอป แล้วออกและเข้าสู่ระบบใหม่ ตรวจ `isAdmin` ใน response ของ `/api/me`                                                                     |
@@ -178,7 +199,7 @@ docker compose config --quiet
 ```
 
 1. ใช้หน้าต่างไม่ระบุตัวตนทดสอบเปิดแอป ล็อกอิน และ Logout ตรวจว่ากลับไปหน้า Login ของ Keycloak
-2. สมัครบัญชีทดสอบผ่านฟอร์มและ Google แล้วตรวจว่ากลับหน้า Login ก่อนเข้าสู่ระบบเอง
+2. สมัครบัญชีทดสอบผ่านฟอร์ม, Google และ Microsoft แล้วตรวจว่ากลับหน้า Login ก่อนเข้าสู่ระบบเอง สำหรับ Microsoft ให้ตรวจว่ามีหน้าเลือกบัญชีและโปรไฟล์บน Home ตรงกับข้อมูลที่ Keycloak ส่งมา
 3. ล็อกอินด้วยบัญชีทั่วไป แก้โปรไฟล์ แล้วออกและเข้าใหม่เพื่อตรวจว่าค่าคงอยู่ ตรวจว่า API จัดการผู้ใช้ตอบ `403` สำหรับบัญชีนี้
 4. ล็อกอินด้วยบัญชีที่มี Realm Role `admin` ตรวจรายการ เพิ่มบัญชีทดสอบ และลบบัญชีทดสอบที่เพิ่งสร้าง
 5. กด **Log Access Token & JWT** แล้วตรวจ Console ว่ามี token และ decoded payload ของบัญชีที่ล็อกอิน
