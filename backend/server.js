@@ -91,6 +91,37 @@ function readAccessTokenClaims(accessToken) {
   }
 }
 
+async function getMicrosoftDepartment(accessToken) {
+  const brokerUrl = KEYCLOAK_ISSUER.replace(/\/$/, "") + "/broker/microsoft/token";
+  const options = { redirect: "error", signal: AbortSignal.timeout(5000) };
+
+  try {
+    const broker = await fetch(brokerUrl, {
+      ...options,
+      method: "POST",
+      body: new URLSearchParams({
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        token: accessToken,
+      }),
+    });
+    if (!broker.ok) throw new Error(`Keycloak broker HTTP ${broker.status}`);
+    const { access_token: microsoftToken } = await broker.json();
+    if (!microsoftToken) throw new Error("Microsoft access token missing");
+
+    const response = await fetch("https://graph.microsoft.com/v1.0/me?$select=department", {
+      ...options,
+      headers: { Authorization: `Bearer ${microsoftToken}` },
+    });
+    if (!response.ok) throw new Error(`Microsoft Graph HTTP ${response.status}`);
+    const { department } = await response.json();
+    return typeof department === "string" ? department.trim() || null : null;
+  } catch (error) {
+    console.warn("Could not read Microsoft department:", error.message);
+    return null;
+  }
+}
+
 function keycloakLogoutUrl(idToken) {
   return oidc.buildEndSessionUrl(oidcConfig, {
     id_token_hint: idToken,
@@ -190,6 +221,7 @@ app.get([
     req.session.state = state;
     req.session.nonce = nonce;
     req.session.registering = registering;
+    req.session.microsoftAuth = microsoftAuth;
 
     await saveSession(req);
 
@@ -226,7 +258,7 @@ app.get([
 
 app.get("/auth/callback", async (req, res, next) => {
   try {
-    const { codeVerifier, state, nonce, registering } = req.session;
+    const { codeVerifier, state, nonce, registering, microsoftAuth } = req.session;
 
     if (!codeVerifier || !state || !nonce) {
       return res.redirect(`${FRONTEND_URL}/home`);
@@ -283,6 +315,7 @@ app.get("/auth/callback", async (req, res, next) => {
       firstName: claims.given_name ?? accessClaims.given_name,
       lastName: claims.family_name ?? accessClaims.family_name,
       email: claims.email ?? accessClaims.email,
+      department: microsoftAuth ? await getMicrosoftDepartment(tokens.access_token) : null,
       roles: [...new Set(roles)],
       isAdmin: [claims, accessClaims].some((token) => token.realm_access?.roles?.includes("admin")),
     };

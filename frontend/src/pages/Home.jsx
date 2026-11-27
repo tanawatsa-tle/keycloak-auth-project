@@ -146,6 +146,7 @@ function Home() {
             <div><dt>First name</dt><dd>{user.firstName || "—"}</dd></div>
             <div><dt>Last name</dt><dd>{user.lastName || "—"}</dd></div>
             <div><dt>Email</dt><dd>{user.email || "—"}</dd></div>
+            <div><dt>Department</dt><dd>{user.department || "—"}</dd></div>
           </dl>
         )}
       </section>
